@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>マーブル達磨 AR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@600&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+<style>
+/* Layout: camera stage fills the screen above one docked control sheet; title chip floats top-left. Single dark look (camera UI). */
+:root{
+  --ink:#16121a;
+  --sheet:rgba(28,22,32,.9);
+  --paper:#f6eef2;
+  --muted:#b9a9b6;
+  --coral:#ff6f7d;
+  --lilac:#cdb7d8;
+  --line:rgba(246,238,242,.16);
+  --f-display:"Shippori Mincho","Hiragino Mincho ProN","Yu Mincho",serif;
+  --f-body:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+  color-scheme:dark;
+}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0;background:var(--ink);color:var(--paper);font-family:var(--f-body);overflow:hidden}
+#app{position:fixed;inset:0;background:var(--ink);display:flex;flex-direction:column}
+#stage{position:relative;flex:1;min-height:0;overflow:hidden;touch-action:none}
+#gl{position:absolute;inset:0;width:100%;height:100%;display:block}
+#frame{position:absolute;pointer-events:none;overflow:visible;transition:opacity .5s}
+#frame .outline{fill:none;stroke:var(--lilac);stroke-width:1.2;stroke-dasharray:3 2.2;vector-effect:non-scaling-stroke}
+#frame .prog{fill:none;stroke:var(--coral);stroke-width:3;stroke-linecap:round;vector-effect:non-scaling-stroke}
+#frame .face{fill:none;stroke:var(--lilac);stroke-width:1;stroke-dasharray:2 3;opacity:.5;vector-effect:non-scaling-stroke}
+#frame .eye{fill:var(--lilac);opacity:.45}
+#frame.hide{opacity:0}
+
+.top{position:absolute;top:calc(env(safe-area-inset-top,0px) + 12px);left:16px;right:16px;display:flex;pointer-events:none}
+.brand{background:var(--sheet);border:1px solid var(--line);border-radius:999px;padding:7px 14px;display:flex;gap:8px;align-items:baseline;backdrop-filter:blur(8px)}
+.brand b{font-family:var(--f-display);font-weight:600;font-size:16px;letter-spacing:.06em}
+.brand span{font-size:11px;color:var(--muted);letter-spacing:.12em}
+#hint{position:absolute;left:16px;right:16px;top:calc(env(safe-area-inset-top,0px) + 58px);text-align:center;font-size:13px;line-height:1.5;color:var(--paper);text-shadow:0 1px 6px rgba(0,0,0,.75);pointer-events:none;text-wrap:balance;transition:opacity .4s}
+
+.sheet{position:relative;padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 14px);background:var(--sheet);border-top:1px solid var(--line)}
+.panel{width:100%;max-width:520px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+.src{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.src button,.src label{font:500 12px/1 var(--f-body);color:var(--muted);background:transparent;border:1px solid var(--line);border-radius:10px;padding:10px 4px;text-align:center;cursor:pointer;letter-spacing:.04em}
+.src [aria-pressed="true"]{color:var(--paper);border-color:var(--lilac);background:rgba(205,183,216,.12)}
+.src input{position:absolute;width:1px;height:1px;opacity:0}
+.src label:focus-within{outline:2px solid var(--coral);outline-offset:2px}
+.main{font:700 16px/1 var(--f-body);letter-spacing:.12em;color:var(--ink);background:var(--coral);border:0;border-radius:14px;padding:15px;cursor:pointer}
+.main.ghost{background:transparent;color:var(--paper);border:1px solid var(--line)}
+.row{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:center;font-size:12px;color:var(--muted)}
+.row input{width:100%;accent-color:var(--coral)}
+.chips{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.chips .lbl{font-size:12px;color:var(--muted);letter-spacing:.08em;margin-right:4px}
+.chip{width:34px;height:34px;border-radius:50%;border:2px solid transparent;box-shadow:inset 0 0 0 1px rgba(0,0,0,.15);cursor:pointer;padding:0}
+.chip[aria-pressed="true"]{border-color:var(--paper);transform:scale(1.08)}
+.tip{font-size:12px;color:var(--muted);text-align:center}
+.two{display:grid;grid-template-columns:1fr 1.6fr;gap:8px}
+#shot{position:absolute;inset:0;background:rgba(14,10,16,.82);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:16px;z-index:5}
+.shot-in{width:100%;max-width:420px;display:flex;flex-direction:column;gap:12px}
+#shotImg{width:100%;max-height:62vh;object-fit:contain;border-radius:12px;background:#fff;box-shadow:0 10px 40px rgba(0,0,0,.4)}
+.close{font:500 13px/1 var(--f-body);color:var(--muted);background:none;border:0;padding:8px;cursor:pointer}
+button:focus-visible{outline:2px solid var(--coral);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){#frame,#hint{transition:none}}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div id="stage">
+    <canvas id="gl"></canvas>
+    <svg id="frame" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+      <path class="outline" d="M0.01,50.00 L0.01,47.88 L0.11,45.76 L0.28,43.63 L0.54,41.49 L0.84,39.34 L1.19,37.17 L1.58,34.96 L2.00,32.71 L2.50,30.42 L3.09,28.09 L3.81,25.74 L4.71,23.38 L5.84,21.07 L7.21,18.84 L8.85,16.71 L10.75,14.74 L12.88,12.92 L15.22,11.28 L17.71,9.78 L20.32,8.42 L23.02,7.16 L25.77,5.98 L28.57,4.85 L31.43,3.78 L34.36,2.78 L37.35,1.87 L40.42,1.10 L43.57,0.50 L46.77,0.13 L50.00,0.00 L53.23,0.13 L56.43,0.50 L59.58,1.10 L62.65,1.87 L65.64,2.78 L68.57,3.78 L71.43,4.85 L74.23,5.98 L76.98,7.16 L79.68,8.42 L82.29,9.78 L84.78,11.28 L87.12,12.92 L89.25,14.74 L91.15,16.71 L92.79,18.84 L94.16,21.07 L95.29,23.38 L96.19,25.74 L96.91,28.09 L97.50,30.42 L98.00,32.71 L98.42,34.96 L98.81,37.17 L99.16,39.34 L99.46,41.49 L99.72,43.63 L99.89,45.76 L99.99,47.88 L99.99,50.00 L99.89,52.11 L99.70,54.22 L99.42,56.33 L99.05,58.43 L98.60,60.53 L98.08,62.64 L97.48,64.74 L96.80,66.85 L96.02,68.97 L95.16,71.09 L94.18,73.21 L93.10,75.33 L91.91,77.45 L90.59,79.56 L89.15,81.67 L87.57,83.75 L85.84,85.80 L83.95,87.79 L81.88,89.71 L79.64,91.52 L77.21,93.19 L74.61,94.70 L71.84,96.03 L68.94,97.16 L65.93,98.08 L62.83,98.80 L59.66,99.35 L56.46,99.72 L53.24,99.93 L50.00,100.00 L46.76,99.93 L43.54,99.72 L40.34,99.35 L37.17,98.80 L34.07,98.08 L31.06,97.16 L28.16,96.03 L25.39,94.70 L22.79,93.19 L20.36,91.52 L18.12,89.71 L16.05,87.79 L14.16,85.80 L12.43,83.75 L10.85,81.67 L9.41,79.56 L8.09,77.45 L6.90,75.33 L5.82,73.21 L4.84,71.09 L3.98,68.97 L3.20,66.85 L2.52,64.74 L1.92,62.64 L1.40,60.53 L0.95,58.43 L0.58,56.33 L0.30,54.22 L0.11,52.11Z"/>
+      <path id="prog" class="prog" d="M0.01,50.00 L0.01,47.88 L0.11,45.76 L0.28,43.63 L0.54,41.49 L0.84,39.34 L1.19,37.17 L1.58,34.96 L2.00,32.71 L2.50,30.42 L3.09,28.09 L3.81,25.74 L4.71,23.38 L5.84,21.07 L7.21,18.84 L8.85,16.71 L10.75,14.74 L12.88,12.92 L15.22,11.28 L17.71,9.78 L20.32,8.42 L23.02,7.16 L25.77,5.98 L28.57,4.85 L31.43,3.78 L34.36,2.78 L37.35,1.87 L40.42,1.10 L43.57,0.50 L46.77,0.13 L50.00,0.00 L53.23,0.13 L56.43,0.50 L59.58,1.10 L62.65,1.87 L65.64,2.78 L68.57,3.78 L71.43,4.85 L74.23,5.98 L76.98,7.16 L79.68,8.42 L82.29,9.78 L84.78,11.28 L87.12,12.92 L89.25,14.74 L91.15,16.71 L92.79,18.84 L94.16,21.07 L95.29,23.38 L96.19,25.74 L96.91,28.09 L97.50,30.42 L98.00,32.71 L98.42,34.96 L98.81,37.17 L99.16,39.34 L99.46,41.49 L99.72,43.63 L99.89,45.76 L99.99,47.88 L99.99,50.00 L99.89,52.11 L99.70,54.22 L99.42,56.33 L99.05,58.43 L98.60,60.53 L98.08,62.64 L97.48,64.74 L96.80,66.85 L96.02,68.97 L95.16,71.09 L94.18,73.21 L93.10,75.33 L91.91,77.45 L90.59,79.56 L89.15,81.67 L87.57,83.75 L85.84,85.80 L83.95,87.79 L81.88,89.71 L79.64,91.52 L77.21,93.19 L74.61,94.70 L71.84,96.03 L68.94,97.16 L65.93,98.08 L62.83,98.80 L59.66,99.35 L56.46,99.72 L53.24,99.93 L50.00,100.00 L46.76,99.93 L43.54,99.72 L40.34,99.35 L37.17,98.80 L34.07,98.08 L31.06,97.16 L28.16,96.03 L25.39,94.70 L22.79,93.19 L20.36,91.52 L18.12,89.71 L16.05,87.79 L14.16,85.80 L12.43,83.75 L10.85,81.67 L9.41,79.56 L8.09,77.45 L6.90,75.33 L5.82,73.21 L4.84,71.09 L3.98,68.97 L3.20,66.85 L2.52,64.74 L1.92,62.64 L1.40,60.53 L0.95,58.43 L0.58,56.33 L0.30,54.22 L0.11,52.11Z" pathLength="100" stroke-dasharray="0 100"/>
+      <ellipse class="face" cx="51" cy="45.5" rx="41" ry="19"/>
+      <ellipse class="eye" cx="28" cy="47" rx="7.5" ry="7"/>
+      <ellipse class="eye" cx="74" cy="47" rx="7.5" ry="7"/>
+    </svg>
+  </div>
+  <div class="top"><div class="brand"><b>マーブル達磨</b><span>AR</span></div></div>
+  <div id="hint" role="status"></div>
+  <div id="shot" hidden role="dialog" aria-modal="true" aria-label="できた模様">
+    <div class="shot-in">
+      <img id="shotImg" alt="できたマーブル達磨の画像">
+      <div class="two"><button id="dl" class="main ghost">画像を保存</button><button id="share" class="main">シェア</button></div>
+      <button id="shotClose" class="close">とじる</button>
+      <p id="shotNote" class="tip"></p>
+    </div>
+  </div>
+  <div class="sheet">
+    <div class="panel" id="p-align">
+      <button id="m-cam" class="main">カメラを起動</button>
+      <div class="row" id="sizeRow" hidden><label for="size">枠の大きさ</label><input id="size" type="range" min="30" max="160" value="100"></div>
+      <button id="open" class="main" hidden>ダルマをひらく</button>
+    </div>
+    <div class="panel" id="p-marble" hidden>
+      <div class="chips" id="chips"><span class="lbl">この子の色</span></div>
+      <div class="tip">マーブルの部分をタップで色を落とす ・ なぞって混ぜる</div>
+      <div class="two"><button id="back" class="main ghost">もどる</button><button id="save" class="main">この模様を残す</button></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(()=>{
+const DEMO_BOX={x:.2329,y:.2168,w:.5235,h:.4854};
+const RATIO=0.809;
+const PATH=new Path2D();
+(()=>{const pts="M0.01,50.00 L0.01,47.88 L0.11,45.76 L0.28,43.63 L0.54,41.49 L0.84,39.34 L1.19,37.17 L1.58,34.96 L2.00,32.71 L2.50,30.42 L3.09,28.09 L3.81,25.74 L4.71,23.38 L5.84,21.07 L7.21,18.84 L8.85,16.71 L10.75,14.74 L12.88,12.92 L15.22,11.28 L17.71,9.78 L20.32,8.42 L23.02,7.16 L25.77,5.98 L28.57,4.85 L31.43,3.78 L34.36,2.78 L37.35,1.87 L40.42,1.10 L43.57,0.50 L46.77,0.13 L50.00,0.00 L53.23,0.13 L56.43,0.50 L59.58,1.10 L62.65,1.87 L65.64,2.78 L68.57,3.78 L71.43,4.85 L74.23,5.98 L76.98,7.16 L79.68,8.42 L82.29,9.78 L84.78,11.28 L87.12,12.92 L89.25,14.74 L91.15,16.71 L92.79,18.84 L94.16,21.07 L95.29,23.38 L96.19,25.74 L96.91,28.09 L97.50,30.42 L98.00,32.71 L98.42,34.96 L98.81,37.17 L99.16,39.34 L99.46,41.49 L99.72,43.63 L99.89,45.76 L99.99,47.88 L99.99,50.00 L99.89,52.11 L99.70,54.22 L99.42,56.33 L99.05,58.43 L98.60,60.53 L98.08,62.64 L97.48,64.74 L96.80,66.85 L96.02,68.97 L95.16,71.09 L94.18,73.21 L93.10,75.33 L91.91,77.45 L90.59,79.56 L89.15,81.67 L87.57,83.75 L85.84,85.80 L83.95,87.79 L81.88,89.71 L79.64,91.52 L77.21,93.19 L74.61,94.70 L71.84,96.03 L68.94,97.16 L65.93,98.08 L62.83,98.80 L59.66,99.35 L56.46,99.72 L53.24,99.93 L50.00,100.00 L46.76,99.93 L43.54,99.72 L40.34,99.35 L37.17,98.80 L34.07,98.08 L31.06,97.16 L28.16,96.03 L25.39,94.70 L22.79,93.19 L20.36,91.52 L18.12,89.71 L16.05,87.79 L14.16,85.80 L12.43,83.75 L10.85,81.67 L9.41,79.56 L8.09,77.45 L6.90,75.33 L5.82,73.21 L4.84,71.09 L3.98,68.97 L3.20,66.85 L2.52,64.74 L1.92,62.64 L1.40,60.53 L0.95,58.43 L0.58,56.33 L0.30,54.22 L0.11,52.11Z".replace(/[MZ]/g,"").split(" L").map(p=>p.split(",").map(Number));pts.forEach((p,i)=>i?PATH.lineTo(p[0],p[1]):PATH.moveTo(p[0],p[1]));PATH.closePath();})();
+
+const $=id=>document.getElementById(id);
+const stage=$("stage"),cv=$("gl"),svg=$("frame"),hint=$("hint"),prog=$("prog"),size=$("size");
+
+const GLOPT={antialias:false,premultipliedAlpha:false};
+const gl=cv.getContext("webgl2",GLOPT)||cv.getContext("webgl",GLOPT);
+const GL2=typeof WebGL2RenderingContext!=="undefined"&&gl instanceof WebGL2RenderingContext;
+if(!gl){hint.textContent="この端末のブラウザはWebGLに対応していません。";return;}
+
+/* ---------- shaders ---------- */
+const VS="attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}";
+const NOISE=`float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+float fbm(vec2 p){float v=0.,a=.5;for(int i=0;i<4;i++){v+=a*n(p);p=p*2.03+vec2(1.7,9.2);a*=.5;}return v;}`;
+const TONE="vec3 tone(vec3 x){return mix(x,.7+.3*(1.-exp(-(x-.7)/.3)),step(.7,x));}";
+const FS_SRC=`precision highp float;
+uniform sampler2D uSrc,uMask;uniform vec2 uRes;uniform float uSrcA,uT,uAmp,uMelt,uFill;uniform vec3 uGain;uniform vec4 uF0,uF;uniform vec3 uBg;
+${NOISE}
+vec2 cover(vec2 uv){float ca=uRes.x/uRes.y;if(uSrcA>ca)uv.x=(uv.x-.5)*ca/uSrcA+.5;else uv.y=(uv.y-.5)*uSrcA/ca+.5;return uv;}
+${TONE}
+const vec2 FC=vec2(.51,.455),FR=vec2(.41,.19);
+void main(){
+ vec2 uv=vec2(gl_FragCoord.x/uRes.x,1.-gl_FragCoord.y/uRes.y);
+ vec2 local=(uv-uF.xy)/uF.zw;
+ vec2 e=(local-FC)/(FR*1.18);float d=length(e);
+ vec2 local2=local;float bl=0.;
+ if(uMelt>0.&&d<1.){
+  // face melts: fill it with the marble just above and just below, blended softly
+  float yb=sqrt(max(1.-e.x*e.x,0.));
+  float nz=(fbm(local*vec2(4.,8.)+3.1)-.5)*.5*(1.-d);
+  vec2 up=FC+vec2(e.x,-yb-(yb+e.y)*.5+nz)*FR*1.18, dn=FC+vec2(e.x,yb+(yb-e.y)*.8+nz)*FR*1.18;
+  bl=uMelt;local=mix(local,up,uMelt);local2=mix(local2,dn,uMelt);
+ }
+ float wy=smoothstep(-.6,.6,e.y+(fbm(local*6.)-.5)*.8);
+ vec2 q=uF0.xy+local*uF0.zw,q2=uF0.xy+local2*uF0.zw;
+ float m=texture2D(uMask,q).r;
+ float w=m*mix(smoothstep(.75,.95,d),1.,uMelt);
+ vec2 off=vec2(0.);
+ if(w>.001&&uAmp>0.){
+  vec2 p=local*vec2(.81,1.)*2.6;float t=uT;
+  vec2 a=vec2(fbm(p+vec2(0.,t*.15)),fbm(p+vec2(5.2,1.3)-t*.12));
+  vec2 r=vec2(fbm(p+3.*a+vec2(1.7,9.2)+t*.1),fbm(p+3.*a+vec2(8.3,2.8)-t*.08));
+  off=(r-.5)*3.5*uAmp;
+  off.x+=sin(local.y*7.+t*1.3+a.x*6.)*uAmp*1.3;
+  off.y+=sin(local.x*5.-t*.9+a.y*5.)*uAmp*.45;
+  off*=w*uF0.zw;
+  for(int k=0;k<4;k++){if(texture2D(uMask,q+off).r<.85)off*=.5;}
+ }
+ vec3 col=texture2D(uSrc,clamp(cover(q+off),0.,1.)).rgb;
+ if(bl>0.)col=mix(col,texture2D(uSrc,clamp(cover(q2+off),0.,1.)).rgb,wy);
+ col=tone(col*mix(vec3(1.),uGain,uFill));
+ float outside=1.-smoothstep(.0,.06,texture2D(uMask,q+off).r);
+ col*=mix(1.,.35,uFill*outside);
+ gl_FragColor=vec4(col,1.);
+}`;
+const FS_OP=`precision highp float;
+uniform sampler2D uDye,uMask;uniform vec2 uRes,uA,uB;uniform float uAsp,uType,uR0,uR1,uLam;uniform vec3 uInk;
+vec3 dye(vec2 p){vec2 uv=p/vec2(uAsp,1.);return texture2D(uDye,vec2(uv.x,1.-uv.y)).rgb;}
+float msk(vec2 p){return texture2D(uMask,p/vec2(uAsp,1.)).r;}
+void main(){
+ vec2 uv=vec2(gl_FragCoord.x/uRes.x,1.-gl_FragCoord.y/uRes.y);
+ vec2 p=uv*vec2(uAsp,1.);vec3 col;
+ if(uType<.5){
+  vec2 d=p-uA;float dd=max(dot(d,d),1e-8);float dl=uR1*uR1-uR0*uR0;
+  vec2 s=uA+d*sqrt(max(dd-dl,0.)/dd);if(msk(s)<.2)s=p;
+  vec3 pushed=dye(s);
+  float px=1.5/uRes.y;
+  col=mix(uInk,pushed,smoothstep(-px,px,sqrt(dd)-sqrt(max(dl,0.))));
+ }else{
+  vec2 ab=uB-uA;float len=length(ab);vec2 dir=ab/max(len,1e-5);vec2 ap=p-uA;
+  float t=clamp(dot(ap,dir),0.,len);float dist=length(ap-dir*t);
+  vec2 s=p-ab*exp(-dist/uLam);if(msk(s)<.2)s=p;
+  col=dye(s);
+ }
+ gl_FragColor=vec4(col,1.);
+}`;
+const FS_SHOW=`precision highp float;
+uniform sampler2D uDye,uCap,uMask;uniform vec2 uRes;uniform float uT,uAmb,uSrcA,uWhite;uniform vec4 uF,uF0;uniform vec3 uGain;
+${NOISE}
+${TONE}
+vec2 cover(vec2 uv){float ca=uRes.x/uRes.y;if(uSrcA>ca)uv.x=(uv.x-.5)*ca/uSrcA+.5;else uv.y=(uv.y-.5)*uSrcA/ca+.5;return uv;}
+const vec2 FC=vec2(.51,.455),FR=vec2(.41,.19);
+vec3 dyeAt(vec2 uv){return texture2D(uDye,vec2(uv.x,1.-uv.y)).rgb;}
+void main(){
+ vec2 uv=vec2(gl_FragCoord.x/uRes.x,1.-gl_FragCoord.y/uRes.y);
+ vec2 local=(uv-uF.xy)/uF.zw;vec2 q=uF0.xy+local*uF0.zw;
+ vec3 cap=tone(texture2D(uCap,clamp(cover(q),0.,1.)).rgb*uGain);
+ float m=texture2D(uMask,uv).r;
+ float d=length((local-FC)/FR);
+ vec2 off=vec2(0.);float w=m*smoothstep(1.,1.3,d)*uAmb;
+ if(w>.001){
+  vec2 p=local*vec2(.81,1.)*1.25;float t=uT;
+  vec2 a=vec2(fbm(p+vec2(0.,t*.15)),fbm(p+vec2(5.2,1.3)-t*.12));
+  vec2 r=vec2(fbm(p+2.2*a+vec2(1.7,9.2)+t*.1),fbm(p+2.2*a+vec2(8.3,2.8)-t*.08));
+  off=(r-.5)*3.*.05;
+  off.x+=sin(local.y*3.5+t*1.3+a.x*4.)*.05;
+  off*=w*uF.zw;
+  for(int k=0;k<4;k++){if(texture2D(uMask,uv+off).r<.85)off*=.5;}
+ }
+ float edge=mix(smoothstep(.03,.25,m),smoothstep(.07,.15,m),uWhite);
+ vec3 col=mix(mix(cap*.35,vec3(1.),uWhite),dyeAt(uv+off),edge);
+ col=mix(col,cap,1.-smoothstep(1.,1.08,d));
+ gl_FragColor=vec4(col,1.);
+}`;
+const SIM=`precision highp float;uniform vec2 uTexel;
+uniform sampler2D uMask;uniform vec4 uF;
+vec2 UV(){return gl_FragCoord.xy*uTexel;}
+float obstacle(vec2 c){vec2 td=vec2(c.x,1.-c.y);float m=texture2D(uMask,td).r;vec2 l=(td-uF.xy)/uF.zw;
+ float d=length((l-vec2(.51,.455))/vec2(.41,.19));return smoothstep(.15,.5,m)*smoothstep(1.,1.12,d);}
+`;
+const FS_CURL=SIM+`uniform sampler2D uV;void main(){vec2 u=UV();
+ float L=texture2D(uV,u-vec2(uTexel.x,0.)).y,R=texture2D(uV,u+vec2(uTexel.x,0.)).y,T=texture2D(uV,u+vec2(0.,uTexel.y)).x,B=texture2D(uV,u-vec2(0.,uTexel.y)).x;
+ gl_FragColor=vec4(.5*(R-L-T+B),0.,0.,1.);}`;
+const FS_VORT=SIM+`uniform sampler2D uV,uC;uniform float uCurl,uDt;void main(){vec2 u=UV();
+ float L=texture2D(uC,u-vec2(uTexel.x,0.)).x,R=texture2D(uC,u+vec2(uTexel.x,0.)).x,T=texture2D(uC,u+vec2(0.,uTexel.y)).x,B=texture2D(uC,u-vec2(0.,uTexel.y)).x,C=texture2D(uC,u).x;
+ vec2 f=.5*vec2(abs(T)-abs(B),abs(R)-abs(L));f/=length(f)+1e-4;f*=uCurl*C;f.y*=-1.;
+ vec2 v=texture2D(uV,u).xy+f*uDt;v=clamp(v,-1000.,1000.)*obstacle(u);gl_FragColor=vec4(v,0.,1.);}`;
+const FS_DIV=SIM+`uniform sampler2D uV;void main(){vec2 u=UV();
+ float L=texture2D(uV,u-vec2(uTexel.x,0.)).x,R=texture2D(uV,u+vec2(uTexel.x,0.)).x,T=texture2D(uV,u+vec2(0.,uTexel.y)).y,B=texture2D(uV,u-vec2(0.,uTexel.y)).y;
+ gl_FragColor=vec4(.5*(R-L+T-B),0.,0.,1.);}`;
+const FS_CLR=SIM+`uniform sampler2D uP;uniform float uK;void main(){gl_FragColor=uK*texture2D(uP,UV());}`;
+const FS_PRS=SIM+`uniform sampler2D uP,uD;void main(){vec2 u=UV();
+ float L=texture2D(uP,u-vec2(uTexel.x,0.)).x,R=texture2D(uP,u+vec2(uTexel.x,0.)).x,T=texture2D(uP,u+vec2(0.,uTexel.y)).x,B=texture2D(uP,u-vec2(0.,uTexel.y)).x;
+ gl_FragColor=vec4((L+R+B+T-texture2D(uD,u).x)*.25,0.,0.,1.);}`;
+const FS_GRAD=SIM+`uniform sampler2D uP,uV;void main(){vec2 u=UV();
+ float L=texture2D(uP,u-vec2(uTexel.x,0.)).x,R=texture2D(uP,u+vec2(uTexel.x,0.)).x,T=texture2D(uP,u+vec2(0.,uTexel.y)).x,B=texture2D(uP,u-vec2(0.,uTexel.y)).x;
+ vec2 v=texture2D(uV,u).xy-vec2(R-L,T-B);gl_FragColor=vec4(v*obstacle(u),0.,1.);}`;
+const FS_ADV=SIM+`uniform sampler2D uV,uS;uniform vec2 uSimTexel;uniform float uDt,uDiss,uObs;void main(){vec2 u=UV();
+ vec2 c=u-uDt*texture2D(uV,u).xy*uSimTexel;vec4 s=texture2D(uS,c)/(1.+uDiss*uDt);
+ if(uObs>.5)s.xy*=obstacle(u);gl_FragColor=vec4(s.rgb,1.);}`;
+const FS_SPL=SIM+`uniform sampler2D uS;uniform vec2 uP;uniform vec3 uCol;uniform float uR,uAsp;void main(){vec2 u=UV();
+ vec2 d=u-uP;d.x*=uAsp;gl_FragColor=vec4(texture2D(uS,u).rgb+uCol*exp(-dot(d,d)/uR)*obstacle(u),1.);}`;
+function program(fs){const pr=gl.createProgram();
+ [[gl.VERTEX_SHADER,VS],[gl.FRAGMENT_SHADER,fs]].forEach(([t,s])=>{const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);
+  if(!gl.getShaderParameter(o,gl.COMPILE_STATUS))console.error(gl.getShaderInfoLog(o));gl.attachShader(pr,o);});
+ gl.bindAttribLocation(pr,0,"p");gl.linkProgram(pr);const u={};
+ for(let i=0;i<gl.getProgramParameter(pr,gl.ACTIVE_UNIFORMS);i++){const n=gl.getActiveUniform(pr,i).name;u[n]=gl.getUniformLocation(pr,n);}
+ return{pr,u};}
+const P={src:program(FS_SRC),op:program(FS_OP),show:program(FS_SHOW),curl:program(FS_CURL),vort:program(FS_VORT),div:program(FS_DIV),clr:program(FS_CLR),prs:program(FS_PRS),grad:program(FS_GRAD),adv:program(FS_ADV),spl:program(FS_SPL)};
+gl.bindBuffer(gl.ARRAY_BUFFER,gl.createBuffer());gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+function tex(){const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
+ [[gl.TEXTURE_MIN_FILTER,gl.LINEAR],[gl.TEXTURE_MAG_FILTER,gl.LINEAR],[gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE],[gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE]].forEach(([k,v])=>gl.texParameteri(gl.TEXTURE_2D,k,v));return t;}
+function put(t,el){gl.bindTexture(gl.TEXTURE_2D,t);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,el);}
+function bindTex(unit,t){gl.activeTexture(gl.TEXTURE0+unit);gl.bindTexture(gl.TEXTURE_2D,t);}
+const tSrc=tex(),tMask=tex(),tCap=tex();
+const U8={i:gl.RGBA,t:gl.UNSIGNED_BYTE};
+function rt(w,h,fmt){const t=tex();gl.texImage2D(gl.TEXTURE_2D,0,fmt.i,w,h,0,gl.RGBA,fmt.t,null);
+ const f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,0);
+ const ok=gl.checkFramebufferStatus(gl.FRAMEBUFFER)===gl.FRAMEBUFFER_COMPLETE;gl.bindFramebuffer(gl.FRAMEBUFFER,null);return{t,f,w,h,ok};}
+function freeRT(r){if(r){gl.deleteTexture(r.t);gl.deleteFramebuffer(r.f);}}
+// half-float targets make the water simulation possible; without them we fall back to drops + combing
+const HF=(()=>{let fmt=null;
+ if(GL2){if(gl.getExtension("EXT_color_buffer_float")||gl.getExtension("EXT_color_buffer_half_float"))fmt={i:gl.RGBA16F,t:gl.HALF_FLOAT};}
+ else{const e=gl.getExtension("OES_texture_half_float");if(e&&gl.getExtension("OES_texture_half_float_linear")){gl.getExtension("EXT_color_buffer_half_float");fmt={i:gl.RGBA,t:e.HALF_FLOAT_OES};}}
+ if(!fmt)return null;const r=rt(4,4,fmt);freeRT(r);return r.ok?fmt:null;})();
+let dye=[],DW=0,DH=0,cur=0,fl=null,SW=0,SH=0;
+function makeDye(){dye.forEach(freeRT);
+ const s=Math.min(devicePixelRatio||1,1.5);DW=Math.max(2,W*s|0);DH=Math.max(2,H*s|0);
+ dye=[0,1].map(()=>rt(DW,DH,HF||U8));
+ if(fl)Object.values(fl).flat().forEach(freeRT);fl=null;
+ if(HF){const k=170/Math.min(W,H);SW=Math.max(8,W*k|0);SH=Math.max(8,H*k|0);
+  fl={v:[rt(SW,SH,HF),rt(SW,SH,HF)],p:[rt(SW,SH,HF),rt(SW,SH,HF)],d:[rt(SW,SH,HF)],c:[rt(SW,SH,HF)]};}}
+function clearRT(r){gl.bindFramebuffer(gl.FRAMEBUFFER,r.f);gl.viewport(0,0,r.w,r.h);gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);}
+
+/* ---------- state ---------- */
+const mc=document.createElement("canvas"),mx=mc.getContext("2d");
+let W=0,H=0,dpr=1,src=null,srcA=1,isVideo=false,video=null,stream=null,mode="cam";
+let frame={cx:0,cy:0,h:0},base=0,dirtyMask=true,t=0,last=performance.now();
+let flows=[],saved=null,FF=null,gain=[1,1,1],state="align",zt=0,F0=null,capA=1,palette=[[.8,.7,.8]],inkIdx=1,drops=[],combs=[],marbleT=0,autoDrops=[];
+
+function resize(){dpr=Math.min(devicePixelRatio||1,2);W=stage.clientWidth;H=stage.clientHeight;cv.width=W*dpr|0;cv.height=H*dpr|0;
+ if(state!=="align")toAlign();placeDefault();makeDye();}
+function screenOfSrc(x,y){const ca=W/H;let u=x,v=y;if(srcA>ca)u=(x-.5)*srcA/ca+.5;else v=(y-.5)*ca/srcA+.5;return[u*W,v*H];}
+function srcOfScreen(u,v){const ca=W/H;if(srcA>ca)u=(u-.5)*ca/srcA+.5;else v=(v-.5)*srcA/ca+.5;return[u,v];}
+function placeDefault(){
+ if(mode==="demo"&&!isVideo){const a=screenOfSrc(DEMO_BOX.x,DEMO_BOX.y),b=screenOfSrc(DEMO_BOX.x+DEMO_BOX.w,DEMO_BOX.y+DEMO_BOX.h);
+  base=b[1]-a[1];frame={cx:(a[0]+b[0])/2,cy:(a[1]+b[1])/2,h:base};size.value=100;}
+ else{base=Math.min(H*.5,W*.7/RATIO);frame={cx:W/2,cy:H*.47,h:base*size.value/100};}
+ layout();}
+function frameUV(){const w=frame.h*RATIO;return[(frame.cx-w/2)/W,(frame.cy-frame.h/2)/H,w/W,frame.h/H];}
+function layout(){const w=frame.h*RATIO;Object.assign(svg.style,{left:(frame.cx-w/2)+"px",top:(frame.cy-frame.h/2)+"px",width:w+"px",height:frame.h+"px"});dirtyMask=true;}
+function buildMask(){const s=.5;mc.width=Math.max(2,W*s|0);mc.height=Math.max(2,H*s|0);
+ mx.globalCompositeOperation="source-over";mx.fillStyle="#000";mx.fillRect(0,0,mc.width,mc.height);
+ mx.globalCompositeOperation="lighter";const N=14,w=frame.h*RATIO,v=255/N|0;mx.fillStyle=`rgb(${v},${v},${v})`;
+ for(let i=0;i<N;i++){const k=1-i*.009;mx.save();mx.translate(frame.cx*s,frame.cy*s);mx.scale(w*s*k/100,frame.h*s*k/100);mx.translate(-50,-50);mx.fill(PATH);mx.restore();}
+ put(tMask,mc);dirtyMask=false;}
+function setSrc(el,a,vid){src=el;srcA=a;isVideo=vid;if(!vid)put(tSrc,el);placeDefault();}
+function pressed(k){Object.entries(btn).forEach(([n,b])=>b.setAttribute("aria-pressed",n===k));}
+function stopCam(){if(stream){stream.getTracks().forEach(x=>x.stop());stream=null;}isVideo=false;}
+function fromImage(img){const m=1600,s=Math.min(1,m/Math.max(img.naturalWidth,img.naturalHeight));const c=document.createElement("canvas");
+ c.width=img.naturalWidth*s|0;c.height=img.naturalHeight*s|0;c.getContext("2d").drawImage(img,0,0,c.width,c.height);return c;}
+function say(s){hint.textContent=s;}
+
+/* ---------- sources ---------- */
+$("m-cam").onclick=async()=>{
+ try{stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1440}}});}
+ catch(err){say("カメラを使えませんでした。ブラウザの設定でカメラを許可するか、SafariやChromeで開き直してください（LINEやInstagramの中のブラウザでは使えないことがあります）。");return;}
+ mode="cam";$("m-cam").hidden=true;$("sizeRow").hidden=false;$("open").hidden=false;video=document.createElement("video");video.playsInline=true;video.muted=true;video.setAttribute("playsinline","");video.srcObject=stream;await video.play();
+ setSrc(video,video.videoWidth/video.videoHeight,true);armed=true;steady=0;say("ダルマを枠に合わせて、そのまま止めてください");};
+size.oninput=()=>{frame.h=base*size.value/100;layout();};
+
+/* ---------- palette (k-means on the daruma body, face excluded) ---------- */
+function extractPalette(cap){
+ const f=frameUV(),a=srcOfScreen(f[0],f[1]),b=srcOfScreen(f[0]+f[2],f[1]+f[3]);
+ const GW=48,GH=60,c=document.createElement("canvas");c.width=GW;c.height=GH;const x=c.getContext("2d");
+ x.drawImage(cap,a[0]*cap.width,a[1]*cap.height,(b[0]-a[0])*cap.width,(b[1]-a[1])*cap.height,0,0,GW,GH);
+ const d=x.getImageData(0,0,GW,GH).data,px=[],face=[],tx=document.createElement("canvas").getContext("2d");
+ for(let j=0;j<GH;j++)for(let i=0;i<GW;i++){const lx=(i+.5)/GW,ly=(j+.5)/GH;
+  if(!tx.isPointInPath(PATH,lx*100,ly*100))continue;
+  if(((lx-.51)/.43)**2+((ly-.455)/.21)**2<1){
+   if(((lx-.51)/.3)**2+((ly-.455)/.14)**2<1&&Math.min((lx-.28)**2+(ly-.47)**2,(lx-.74)**2+(ly-.47)**2)>.012&&(lx-.51)**2+(ly-.47)**2>.004){
+    const k=(j*GW+i)*4;face.push([d[k]/255,d[k+1]/255,d[k+2]/255]);}
+   continue;}
+  const k=(j*GW+i)*4;px.push([d[k]/255,d[k+1]/255,d[k+2]/255]);}
+ if(px.length<10)return{pal:[[.88,.8,.86],[1,.45,.5],[.78,.68,.86]],gain:[1,1,1]};
+ // the face is white paint: use it as the white reference (exposure + colour cast)
+ face.sort((p,r)=>(r[0]+r[1]+r[2])-(p[0]+p[1]+p[2]));const fs=face.slice(0,Math.max(1,face.length>>1));
+ let ref=[0,1,2].map(c=>fs.reduce((s,p)=>s+p[c],0)/fs.length);if(!face.length)ref=[.8,.8,.8];
+ const rm=Math.max(...ref,.02),wb=ref.map(v=>Math.min(1.6,rm/Math.max(v,.01))),ex=Math.min(2.3,Math.max(1,.8/rm));
+ const gain=wb.map(v=>v*ex);
+ let q=px.map(p=>p.map((v,c)=>Math.min(1,v*gain[c]))).filter(p=>Math.max(...p)>.42);
+ if(q.length<10)q=px.map(p=>p.map((v,c)=>Math.min(1,v*gain[c])));
+ q.sort((p,r)=>(p[0]+p[1]+p[2])-(r[0]+r[1]+r[2]));
+ const K=6;let cs=[...Array(K)].map((_,i)=>q[Math.floor((i+.5)/K*q.length)].slice()),cnt;
+ for(let it=0;it<12;it++){const s=cs.map(()=>[0,0,0]);cnt=cs.map(()=>0);
+  q.forEach(p=>{let bi=0,bd=9;cs.forEach((c,i)=>{const dd=(p[0]-c[0])**2+(p[1]-c[1])**2+(p[2]-c[2])**2;if(dd<bd){bd=dd;bi=i;}});s[bi][0]+=p[0];s[bi][1]+=p[1];s[bi][2]+=p[2];cnt[bi]++;});
+  cs=cs.map((c,i)=>cnt[i]?s[i].map(v=>v/cnt[i]):c);}
+ const sat=c=>Math.max(...c)-Math.min(...c);
+ const all=cs.map((c,i)=>({c,n:cnt[i]})).filter(o=>o.n>q.length*.02).sort((p,r)=>r.n-p.n);
+ const keep=[];all.forEach(o=>{if(keep.every(k=>Math.hypot(k[0]-o.c[0],k[1]-o.c[1],k[2]-o.c[2])>.1))keep.push(o.c);});
+ const vivid=c=>{const m=(c[0]+c[1]+c[2])/3;return c.map(v=>Math.min(1,Math.max(0,m+(v-m)*1.35)));};
+ const inks=keep.slice(1).sort((p,r)=>sat(r)-sat(p)).slice(0,4).map(vivid);
+ return{pal:[keep[0],...inks],gain};}
+function renderChips(){const box=$("chips");box.querySelectorAll(".chip").forEach(e=>e.remove());
+ palette.forEach((c,i)=>{const b=document.createElement("button");b.className="chip";b.style.background=`rgb(${c.map(v=>v*255|0)})`;
+  b.setAttribute("aria-label",`色 ${i+1}`);b.setAttribute("aria-pressed",i===inkIdx);b.onclick=()=>{inkIdx=i;renderChips();};box.appendChild(b);});}
+
+/* ---------- sequence ---------- */
+const capC=document.createElement("canvas");
+function openDaruma(){if(state!=="align"||!src)return;
+ const sw=isVideo?video.videoWidth:src.width,sh=isVideo?video.videoHeight:src.height;
+ capC.width=sw;capC.height=sh;capC.getContext("2d").drawImage(src,0,0,sw,sh);put(tCap,capC);capA=sw/sh;
+ {const r=extractPalette(capC);palette=r.pal;gain=r.gain;}inkIdx=Math.min(1,palette.length-1);renderChips();
+ saved={...frame};F0=frameUV();
+ const fh=Math.min(H*.9,W*.94/RATIO),fw=fh*RATIO;FF=[(W-fw)/2/W,(H-fh)/2/H,fw/W,fh/H];state="zoom";zt=0;svg.classList.add("hide");say("");
+ $("p-align").hidden=true;$("p-marble").hidden=false;}
+function toAlign(){state="align";splats=[];flows=[];$("shot").hidden=true;if(saved){frame={...saved};layout();}drops=[];combs=[];autoDrops=[];svg.classList.remove("hide");$("p-align").hidden=false;$("p-marble").hidden=true;
+ armed=false;steady=0;prog.setAttribute("stroke-dasharray","0 100");
+ say(mode==="cam"?"もう一度試すときは、ダルマから一度カメラを外してから合わせてください":"「ダルマをひらく」を押してください");}
+$("open").onclick=openDaruma;$("back").onclick=toAlign;
+/* ---------- keep the pattern: white background + logo, 4:5 for social ---------- */
+const LOGO=new Image();LOGO.src="data:image/png;base64,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";
+let shotBlob=null,shotURL=null;
+async function makeShot(){
+ composite(1);
+ const w=frame.h*RATIO*dpr,h=frame.h*dpr,x0=(frame.cx*dpr-w/2),y0=(frame.cy*dpr-h/2);
+ const pad=.04,sx=Math.max(0,x0-w*pad),sy=Math.max(0,y0-h*pad),sw=Math.min(cv.width-sx,w*(1+2*pad)),sh=Math.min(cv.height-sy,h*(1+2*pad));
+ const crop=document.createElement("canvas");crop.width=sw|0;crop.height=sh|0;crop.getContext("2d").drawImage(cv,sx,sy,sw,sh,0,0,sw,sh);
+ const O=document.createElement("canvas");O.width=1080;O.height=1350;const c=O.getContext("2d");
+ c.fillStyle="#fff";c.fillRect(0,0,1080,1350);
+ const dh=1350*.74,dw=dh*sw/sh,dx=(1080-dw)/2,dy=1350*.07;
+ const g=c.createRadialGradient(540,dy+dh*.985,0,540,dy+dh*.985,dw*.42);g.addColorStop(0,"rgba(60,40,50,.16)");g.addColorStop(1,"rgba(60,40,50,0)");
+ c.save();c.translate(540,dy+dh*.985);c.scale(1,.12);c.translate(-540,-(dy+dh*.985));c.fillStyle=g;c.fillRect(0,0,1080,1350);c.restore();
+ c.drawImage(crop,dx,dy,dw,dh);
+ try{await LOGO.decode();}catch(e){}
+ if(LOGO.naturalWidth){const s=96;c.drawImage(LOGO,540-s/2,1350*.905-s/2,s,s);}
+ shotBlob=await new Promise(r=>O.toBlob(r,"image/jpeg",.92));
+ if(shotURL)URL.revokeObjectURL(shotURL);shotURL=URL.createObjectURL(shotBlob);$("shotImg").src=shotURL;
+ const file=new File([shotBlob],"marble-daruma.jpg",{type:"image/jpeg"});
+ const can=!!(navigator.canShare&&navigator.canShare({files:[file]}));$("share").hidden=!can;$("dl").style.gridColumn=can?"":"1 / -1";
+ $("shotNote").textContent=can?"「シェア」からInstagramやLINEに送れます。iPhoneは「画像を保存」で写真に入ります。":"このブラウザではシェアが使えないので、保存した画像をアプリから投稿してください。";
+ $("shot").hidden=false;}
+$("save").onclick=()=>{if(state==="marble")makeShot();};
+$("shotClose").onclick=()=>{$("shot").hidden=true;};
+$("dl").onclick=()=>{if(!shotURL)return;const a=document.createElement("a");a.href=shotURL;a.download="marble-daruma.jpg";document.body.appendChild(a);a.click();a.remove();};
+$("share").onclick=async()=>{if(!shotBlob)return;const file=new File([shotBlob],"marble-daruma.jpg",{type:"image/jpeg"});
+ try{await navigator.share({files:[file],text:"#三十三工芸 #マーブル達磨"});}catch(e){}};
+
+function drawSrc(texSrc,aspect,f0,f,amp,melt,fill,target){
+ const {pr,u}=P.src;gl.useProgram(pr);
+ if(target){gl.bindFramebuffer(gl.FRAMEBUFFER,target.f);gl.viewport(0,0,DW,DH);gl.uniform2f(u.uRes,DW,DH);}
+ else{gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,cv.width,cv.height);gl.uniform2f(u.uRes,cv.width,cv.height);}
+ bindTex(0,texSrc);bindTex(1,tMask);gl.uniform1i(u.uSrc,0);gl.uniform1i(u.uMask,1);
+ gl.uniform1f(u.uSrcA,aspect);gl.uniform1f(u.uT,t);gl.uniform1f(u.uAmp,amp);gl.uniform1f(u.uMelt,melt);gl.uniform1f(u.uFill,fill);gl.uniform3f(u.uGain,...gain);
+ gl.uniform4f(u.uF0,...f0);gl.uniform4f(u.uF,...f);gl.uniform3f(u.uBg,...palette[0]);
+ gl.drawArrays(gl.TRIANGLE_STRIP,0,4);}
+function opPass(type,A,B,r0,r1,ink,lam){const {pr,u}=P.op;gl.useProgram(pr);const dst=dye[1-cur];
+ gl.bindFramebuffer(gl.FRAMEBUFFER,dst.f);gl.viewport(0,0,DW,DH);bindTex(2,dye[cur].t);gl.uniform1i(u.uDye,2);bindTex(1,tMask);gl.uniform1i(u.uMask,1);
+ gl.uniform2f(u.uRes,DW,DH);gl.uniform1f(u.uAsp,W/H);gl.uniform1f(u.uType,type);gl.uniform2f(u.uA,...A);gl.uniform2f(u.uB,...B);
+ gl.uniform1f(u.uR0,r0);gl.uniform1f(u.uR1,r1);gl.uniform3f(u.uInk,...ink);gl.uniform1f(u.uLam,lam);
+ gl.drawArrays(gl.TRIANGLE_STRIP,0,4);cur=1-cur;}
+function pass(name,dst,set){const {pr,u}=P[name];gl.useProgram(pr);gl.bindFramebuffer(gl.FRAMEBUFFER,dst.f);gl.viewport(0,0,dst.w,dst.h);
+ gl.uniform2f(u.uTexel,1/dst.w,1/dst.h);if(u.uMask){bindTex(1,tMask);gl.uniform1i(u.uMask,1);}if(u.uF)gl.uniform4f(u.uF,...FF);
+ let unit=3;set((n,tx)=>{bindTex(unit,tx);gl.uniform1i(u[n],unit++);},u);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);}
+function swapV(){fl.v.reverse();}
+function splatV(x,y,vx,vy){ // x,y screen 0-1 (top-down); v in sim texels/sec
+ pass("spl",fl.v[1],(b,u)=>{b("uS",fl.v[0].t);gl.uniform2f(u.uP,x,1-y);gl.uniform3f(u.uCol,vx,-vy,0);gl.uniform1f(u.uR,.0012);gl.uniform1f(u.uAsp,W/H);});swapV();}
+function fluidStep(dt){
+ pass("curl",fl.c[0],b=>b("uV",fl.v[0].t));
+ pass("vort",fl.v[1],(b,u)=>{b("uV",fl.v[0].t);b("uC",fl.c[0].t);gl.uniform1f(u.uCurl,5);gl.uniform1f(u.uDt,dt);});swapV();
+ pass("div",fl.d[0],b=>b("uV",fl.v[0].t));
+ pass("clr",fl.p[1],(b,u)=>{b("uP",fl.p[0].t);gl.uniform1f(u.uK,.8);});fl.p.reverse();
+ for(let i=0;i<18;i++){pass("prs",fl.p[1],b=>{b("uP",fl.p[0].t);b("uD",fl.d[0].t);});fl.p.reverse();}
+ pass("grad",fl.v[1],b=>{b("uP",fl.p[0].t);b("uV",fl.v[0].t);});swapV();
+ pass("adv",fl.v[1],(b,u)=>{b("uV",fl.v[0].t);b("uS",fl.v[0].t);gl.uniform2f(u.uSimTexel,1/SW,1/SH);gl.uniform1f(u.uDt,dt);gl.uniform1f(u.uDiss,.35);gl.uniform1f(u.uObs,1);});swapV();
+ const src=dye[cur],dst=dye[1-cur];
+ pass("adv",dst,(b,u)=>{b("uV",fl.v[0].t);b("uS",src.t);gl.uniform2f(u.uSimTexel,1/SW,1/SH);gl.uniform1f(u.uDt,dt);gl.uniform1f(u.uDiss,0);gl.uniform1f(u.uObs,0);});cur=1-cur;}
+function addDrop(x,y,R,ink){drops.push({c:[x,y],R,R0:0,t0:performance.now(),ink});}
+function composite(white){const {pr,u}=P.show;gl.useProgram(pr);gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,cv.width,cv.height);
+ bindTex(2,dye[cur].t);gl.uniform1i(u.uDye,2);bindTex(0,tCap);gl.uniform1i(u.uCap,0);bindTex(1,tMask);gl.uniform1i(u.uMask,1);
+ gl.uniform2f(u.uRes,cv.width,cv.height);gl.uniform1f(u.uT,t);gl.uniform1f(u.uAmb,Math.min(1,marbleT/1.5));gl.uniform1f(u.uWhite,white);
+ gl.uniform1f(u.uSrcA,capA);gl.uniform4f(u.uF,...FF);gl.uniform4f(u.uF0,...F0);gl.uniform3f(u.uGain,...gain);
+ gl.drawArrays(gl.TRIANGLE_STRIP,0,4);}
+const ease=x=>x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;
+
+/* ---------- pointer ---------- */
+let drag=null,splats=[];
+function asp(e){const r=stage.getBoundingClientRect();return[(e.clientX-r.left)/H,(e.clientY-r.top)/H];}
+stage.addEventListener("pointerdown",e=>{stage.setPointerCapture(e.pointerId);
+ drag={x:e.clientX,y:e.clientY,cx:frame.cx,cy:frame.cy,t:performance.now(),moved:0,lastP:asp(e)};});
+stage.addEventListener("pointermove",e=>{if(!drag)return;
+ drag.moved=Math.max(drag.moved,Math.hypot(e.clientX-drag.x,e.clientY-drag.y));
+ if(state==="align"){frame.cx=drag.cx+e.clientX-drag.x;frame.cy=drag.cy+e.clientY-drag.y;layout();}
+ else if(state==="marble"&&drag.moved>6){const p=asp(e);
+  if(fl){const r=stage.getBoundingClientRect(),now=performance.now(),dtp=Math.max(8,now-(drag.lt||drag.t))/1000,k=1.15;
+   splats.push([(e.clientX-r.left)/W,(e.clientY-r.top)/H,(p[0]-drag.lastP[0])*H/W*SW/dtp*k,(p[1]-drag.lastP[1])*SH/dtp*k]);drag.lt=now;}
+  else combs.push([drag.lastP,p]);
+  drag.lastP=p;}});
+const hit=document.createElement("canvas").getContext("2d");
+function onBody(e){const r=stage.getBoundingClientRect(),w=frame.h*RATIO,lx=(e.clientX-r.left-(frame.cx-w/2))/w,ly=(e.clientY-r.top-(frame.cy-frame.h/2))/frame.h;
+ return hit.isPointInPath(PATH,lx*100,ly*100)&&Math.hypot((lx-.51)/.41,(ly-.455)/.19)>1.08;}
+stage.addEventListener("pointerup",e=>{if(drag&&state==="marble"&&drag.moved<8&&performance.now()-drag.t<400&&onBody(e)){const p=asp(e);
+  addDrop(p[0],p[1],.03+Math.random()*.035,palette[inkIdx]);inkIdx=(inkIdx+1)%palette.length;renderChips();}drag=null;});
+stage.addEventListener("pointercancel",()=>drag=null);
+addEventListener("resize",resize);
+
+/* ---------- camera steadiness (auto open) ---------- */
+const sc=document.createElement("canvas");sc.width=24;sc.height=30;const sx=sc.getContext("2d",{willReadFrequently:true});
+let prev=null,steady=0,armed=false,lastCheck=0;
+function checkSteady(now){if(now-lastCheck<120)return;const dt=(now-lastCheck)/1000;lastCheck=now;
+ if(!(state==="align"&&mode==="cam"&&isVideo&&video.readyState>=2))return;
+ const f=frameUV(),a=srcOfScreen(f[0],f[1]),b=srcOfScreen(f[0]+f[2],f[1]+f[3]),vw=video.videoWidth,vh=video.videoHeight;
+ sx.drawImage(video,a[0]*vw,a[1]*vh,(b[0]-a[0])*vw,(b[1]-a[1])*vh,0,0,24,30);
+ const d=sx.getImageData(0,0,24,30).data,g=new Float32Array(720);for(let i=0;i<720;i++)g[i]=(d[i*4]+d[i*4+1]+d[i*4+2])/3;
+ if(prev){let s=0;for(let i=0;i<720;i++)s+=Math.abs(g[i]-prev[i]);s/=720;
+  if(s>14)armed=true;
+  if(armed&&s<5)steady+=dt;else steady=0;}
+ prev=g;const p=Math.min(1,steady/1.5);prog.setAttribute("stroke-dasharray",`${p*100} 100`);
+ if(p>=1){steady=0;openDaruma();}}
+
+/* ---------- loop ---------- */
+function loop(now){const dt=Math.min(.05,(now-last)/1000);last=now;t+=dt*1.2;
+ if(src){
+  if(isVideo&&state==="align"&&video.readyState>=2)put(tSrc,video);
+  if(dirtyMask)buildMask();checkSteady(now);
+  if(state==="align")drawSrc(tSrc,srcA,frameUV(),frameUV(),0,0,0,null);
+  else if(state==="zoom"){zt+=dt;const D=1.6,k=Math.min(1,zt/D),p=ease(k);
+   const hh=F0[3]*Math.pow(FF[3]/F0[3],p),ww=hh*F0[2]/F0[3];
+   const cx=F0[0]+F0[2]/2+(FF[0]+FF[2]/2-(F0[0]+F0[2]/2))*p,cy=F0[1]+F0[3]/2+(FF[1]+FF[3]/2-(F0[1]+F0[3]/2))*p;
+   const f=[cx-ww/2,cy-hh/2,ww,hh];
+   if(k>=1){drawSrc(tCap,capA,F0,FF,0,1,1,dye[cur]);
+    frame={cx:(FF[0]+FF[2]/2)*W,cy:(FF[1]+FF[3]/2)*H,h:FF[3]*H};layout();buildMask();state="marble";marbleT=0;
+    autoDrops=[];flows=[]; // the pattern only changes when the viewer touches it
+    if(fl){clearRT(fl.v[0]);clearRT(fl.p[0]);}}
+   else drawSrc(tCap,capA,F0,f,0,0,p,null);}
+  if(state==="marble"){marbleT+=dt;
+   autoDrops=autoDrops.filter(a=>{if(marbleT<a.at)return true;const w=frame.h*RATIO;
+    addDrop((frame.cx-w/2+a.l[0]*w)/H,(frame.cy-frame.h/2+a.l[1]*frame.h)/H,(.035+Math.random()*.02)*frame.h/H,a.ink);return false;});
+   drops=drops.filter(d=>{const k=Math.min(1,(now-d.t0)/900),R1=d.R*(1-Math.pow(1-k,3));if(R1-d.R0>1e-4){opPass(0,d.c,d.c,d.R0,R1,d.ink,0);d.R0=R1;}return k<1;});
+   combs.splice(0,24).forEach(s=>opPass(1,s[0],s[1],0,0,[0,0,0],.035));
+   if(fl){flows=flows.filter(f=>{if(marbleT<f.at)return true;const w=frame.h*RATIO;
+     for(let i=0;i<6;i++){const a=i/5;splatV((frame.cx-w/2+(f.x0+(f.x1-f.x0)*a)*w)/W,(frame.cy-frame.h/2+f.y*frame.h)/H,f.vx*SW,0);}return false;});
+    splats.splice(0,40).forEach(s=>splatV(...s));fluidStep(Math.min(dt,1/30));}
+   composite(0);}
+ }
+ requestAnimationFrame(loop);}
+resize();say("「カメラを起動」を押して、カメラの使用を許可してください");requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
